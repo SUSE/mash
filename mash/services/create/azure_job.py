@@ -44,8 +44,11 @@ class AzureCreateJob(MashJob):
                 )
             )
 
+        self.boot_firmware = self.job_config.get('boot_firmware', ['bios'])
+
     def run_job(self):
         self.status = SUCCESS
+        self.status_msg['images'] = {}
         self.log_callback.info('Creating image.')
 
         self.cloud_image_name = self.status_msg['cloud_image_name']
@@ -54,19 +57,13 @@ class AzureCreateJob(MashJob):
         self.request_credentials([self.account])
         credentials = self.credentials[self.account]
 
-        if image_exists(credentials, self.cloud_image_name):
-            self.log_callback.info(
-                'Deleting image: {0}, image will be replaced.'.format(
-                    self.cloud_image_name
-                )
-            )
-            delete_image(
+        for firmware in self.boot_firmware:
+            image_name = self._create_image(
+                self.blob_name,
                 credentials,
-                self.resource_group,
-                self.cloud_image_name
+                boot_firmware=firmware
             )
-
-        self._create_image(self.blob_name, credentials)
+            self.status_msg['images'][firmware] = image_name
 
         self.log_callback.info(
             'Image has ID: {0} in region {1}'.format(
@@ -75,10 +72,31 @@ class AzureCreateJob(MashJob):
             )
         )
 
-    def _create_image(self, blob_name, credentials):
+    def _create_image(self, blob_name, credentials, boot_firmware='bios'):
         """
         Create image in ARM from existing page blob.
+
+        If boot firmware is uefi use hyper v generation of V2.
         """
+        if boot_firmware == 'uefi':
+            hyper_v_generation = 'V2'
+            image_name = '{name}_uefi'.format(name=self.cloud_image_name)
+        else:
+            hyper_v_generation = 'V1'
+            image_name = self.cloud_image_name
+
+        if image_exists(credentials, image_name):
+            self.log_callback.info(
+                'Deleting image: {0}, image will be replaced.'.format(
+                    image_name
+                )
+            )
+            delete_image(
+                credentials,
+                self.resource_group,
+                image_name
+            )
+
         compute_client = get_client_from_json(
             ComputeManagementClient,
             credentials
@@ -86,9 +104,9 @@ class AzureCreateJob(MashJob):
 
         async_create_image = compute_client.images.begin_create_or_update(
             self.resource_group,
-            self.cloud_image_name, {
+            image_name, {
                 'location': self.region,
-                'hyper_v_generation': 'V1',
+                'hyper_v_generation': hyper_v_generation,
                 'storage_profile': {
                     'os_disk': {
                         'os_type': 'Linux',
@@ -105,3 +123,5 @@ class AzureCreateJob(MashJob):
             }
         )
         async_create_image.result()
+
+        return image_name

@@ -84,6 +84,7 @@ class TestAzureTestJob(object):
         job.status_msg['blob_name'] = 'name.vhd'
         job.cloud_image_name = 'test_image'
         job._log_callback = Mock()
+        job.status_msg['images'] = {'bios': 'name'}
         job.run_job()
 
         mock_test_image.assert_called_once_with(
@@ -125,10 +126,19 @@ class TestAzureTestJob(object):
 
         job.run_job()
 
-        job._log_callback.warning.assert_has_calls([
-            call('Image tests failed in region: East US.'),
-            call('Failed to cleanup image: Cleanup blob failed!')
-        ])
         assert 'Tests broken!' in job._log_callback.error.mock_calls[0][1][0]
         assert mock_delete_image.call_count == 1
         assert mock_delete_blob.call_count == 1
+
+        # Failed cleanup image
+        mock_delete_image.side_effect = Exception('Cleanup image failed!')
+        mock_delete_blob.side_effect = None
+
+        job.run_job()
+
+        job._log_callback.warning.assert_has_calls([
+            call('Image tests failed in region: East US.'),
+            call('Failed to cleanup image page blob: Cleanup blob failed!'),
+            call('Image tests failed in region: East US.'),
+            call('Failed to cleanup image: Cleanup image failed!')
+        ])

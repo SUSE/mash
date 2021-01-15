@@ -1,6 +1,6 @@
 from pytest import raises
 from unittest.mock import (
-    MagicMock, Mock, patch
+    MagicMock, Mock, patch, call
 )
 
 from mash.services.create.azure_job import AzureCreateJob
@@ -41,7 +41,8 @@ class TestAzureCreateJob(object):
             'container': 'container',
             'storage_account': 'storage',
             'region': 'region',
-            'cloud_image_name': 'name'
+            'cloud_image_name': 'name',
+            'boot_firmware': ['bios', 'uefi']
         }
 
         self.config = BaseConfig(
@@ -91,27 +92,45 @@ class TestAzureCreateJob(object):
         self.job.status_msg['blob_name'] = 'name.vhd'
         self.job.run_job()
 
-        assert mock_get_client_from_json.call_count == 1
-        client.images.begin_create_or_update.assert_called_once_with(
-            'group_name', 'name', {
-                'location': 'region',
-                'hyper_v_generation': 'V1',
-                'storage_profile': {
-                    'os_disk': {
-                        'blob_uri':
-                        'https://storage.blob.core.windows.net/'
-                        'container/name.vhd',
-                        'os_type': 'Linux',
-                        'caching': 'ReadWrite',
-                        'os_state': 'Generalized'
+        assert mock_get_client_from_json.call_count == 2
+        client.images.begin_create_or_update.has_calls(
+            call(
+                'group_name', 'name', {
+                    'location': 'region',
+                    'hyper_v_generation': 'V1',
+                    'storage_profile': {
+                        'os_disk': {
+                            'blob_uri':
+                            'https://storage.blob.core.windows.net/'
+                            'container/name.vhd',
+                            'os_type': 'Linux',
+                            'caching': 'ReadWrite',
+                            'os_state': 'Generalized'
+                        }
                     }
                 }
-            }
+            ),
+            call(
+                'group_name', 'name_uefi', {
+                    'location': 'region',
+                    'hyper_v_generation': 'V2',
+                    'storage_profile': {
+                        'os_disk': {
+                            'blob_uri':
+                                'https://storage.blob.core.windows.net/'
+                                'container/name.vhd',
+                            'os_type': 'Linux',
+                            'caching': 'ReadWrite',
+                            'os_state': 'Generalized'
+                        }
+                    }
+                }
+            )
         )
-        async_create_image.result.assert_called_once_with()
+        assert async_create_image.result.call_count == 2
 
         # Image exists
         mock_image_exists.return_value = True
         self.job.run_job()
 
-        assert mock_delete_image.call_count == 1
+        assert mock_delete_image.call_count == 2

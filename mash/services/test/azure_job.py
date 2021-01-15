@@ -29,7 +29,6 @@ from mash.utils.mash_utils import create_ssh_key_pair, create_json_file
 from mash.services.test.img_proof_helper import img_proof_test
 
 instance_types = [
-    'Basic_A2',
     'Standard_B1s',
     'Standard_D2_v3',
     'Standard_E2_v3',
@@ -93,66 +92,76 @@ class AzureTestJob(MashJob):
         self.cloud_image_name = self.status_msg['cloud_image_name']
 
         with create_json_file(credentials) as auth_file:
-            try:
-                result = img_proof_test(
-                    cloud=self.cloud,
-                    description=self.description,
-                    distro=self.distro,
-                    image_id=self.cloud_image_name,
-                    instance_type=self.instance_type,
-                    img_proof_timeout=self.img_proof_timeout,
-                    region=self.region,
-                    service_account_file=auth_file,
-                    ssh_private_key_file=self.ssh_private_key_file,
-                    ssh_user=self.ssh_user,
-                    tests=self.tests,
-                    log_callback=self.log_callback
-                )
-            except Exception as error:
-                self.add_error_msg(str(error))
-                result = {
-                    'status': EXCEPTION,
-                    'msg': str(traceback.format_exc())
-                }
+            for firmware, image in self.status_msg['images'].items():
+                try:
+                    result = img_proof_test(
+                        cloud=self.cloud,
+                        description=self.description,
+                        distro=self.distro,
+                        image_id=image,
+                        instance_type=self.instance_type,
+                        img_proof_timeout=self.img_proof_timeout,
+                        region=self.region,
+                        service_account_file=auth_file,
+                        ssh_private_key_file=self.ssh_private_key_file,
+                        ssh_user=self.ssh_user,
+                        tests=self.tests,
+                        log_callback=self.log_callback,
+                        boot_firmware=firmware
+                    )
+                except Exception as error:
+                    self.add_error_msg(str(error))
+                    result = {
+                        'status': EXCEPTION,
+                        'msg': str(traceback.format_exc())
+                    }
 
-        self.status = process_test_result(
-            result,
-            self.log_callback,
-            self.region,
-            self.status_msg
-        )
+                self.status = process_test_result(
+                    result,
+                    self.log_callback,
+                    self.region,
+                    self.status_msg
+                )
+
+                if self.status != SUCCESS:
+                    break
 
         if self.cleanup_images or \
                 (self.status != SUCCESS and self.cleanup_images is not False):
-            self.cleanup_image()
+            self.cleanup_all_images()
 
-    def cleanup_image(self):
+    def cleanup_all_images(self):
         credentials = self.credentials[self.account]
         blob_name = self.status_msg['blob_name']
 
-        self.log_callback.info(
-            'Cleaning up image: {0} in region: {1}.'.format(
-                self.cloud_image_name,
-                self.region
+        for firmware, image in self.status_msg['images'].items():
+            self.log_callback.info(
+                'Cleaning up image: {0} in region: {1}.'.format(
+                    image,
+                    self.region
+                )
             )
-        )
 
-        with create_json_file(credentials) as auth_file:
             try:
                 delete_image(
                     credentials,
                     self.resource_group,
-                    self.cloud_image_name
-                )
-                delete_blob(
-                    auth_file,
-                    blob_name,
-                    self.container,
-                    self.resource_group,
-                    self.storage_account,
-                    is_page_blob=True
+                    image
                 )
             except Exception as error:
                 msg = 'Failed to cleanup image: {0}'.format(error)
                 self.log_callback.warning(msg)
                 self.add_error_msg(msg)
+
+        try:
+            delete_blob(
+                credentials,
+                blob_name,
+                self.container,
+                self.resource_group,
+                self.storage_account
+            )
+        except Exception as error:
+            msg = 'Failed to cleanup image page blob: {0}'.format(error)
+            self.log_callback.warning(msg)
+            self.add_error_msg(msg)

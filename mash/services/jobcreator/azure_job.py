@@ -195,7 +195,8 @@ class AzureJob(BaseJob):
                 'region': self.region,
                 'container': self.source_container,
                 'resource_group': self.source_resource_group,
-                'storage_account': self.source_storage_account
+                'storage_account': self.source_storage_account,
+                'boot_firmware': self.boot_firmware
             }
         }
 
